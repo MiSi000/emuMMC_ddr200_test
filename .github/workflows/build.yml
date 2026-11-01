@@ -1,0 +1,48 @@
+name: Build emuMMC DDR200 (.kip + .kipm)
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependencias (libnx, compilador, python3)
+        run: |
+          dkp-pacman -Syu --noconfirm switch-dev
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential git ca-certificates python3
+
+      - name: Compilar hactool (lo necesita el Makefile)
+        run: |
+          git clone --depth 1 https://github.com/SciresM/hactool /tmp/hactool
+          cd /tmp/hactool
+          cp config.mk.template config.mk
+          make -j"$(nproc)"
+          install -m 755 hactool /usr/local/bin/hactool
+
+      - name: Compilar emummc.kip
+        run: |
+          export DEVKITPRO=/opt/devkitpro
+          make clean || true
+          make -j"$(nproc)"
+          ls -l emummc.kip emummc_unpacked.kip
+
+      - name: Generar emummc.kipm (para hekate)
+        run: |
+          python3 tools/kip1converter.py emummc_unpacked.kip emummc.data
+          cat emummc.caps emummc.data > emummc.kipm
+          ls -l emummc.caps emummc.data emummc.kipm
+
+      - name: Subir resultados
+        uses: actions/upload-artifact@v4
+        with:
+          name: emummc-ddr200
+          path: |
+            emummc.kip
+            emummc.kipm
+          if-no-files-found: error
