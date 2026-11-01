@@ -13,7 +13,17 @@ jobs:
 
       - name: Instalar dependencias (libnx, compilador, python3)
         run: |
-          dkp-pacman -Syu --noconfirm switch-dev
+          if [ -f /opt/devkitpro/libnx/switch_rules ]; then
+            echo "libnx ya viene en la imagen, no hace falta dkp-pacman"
+          else
+            ok=0
+            for i in 1 2 3 4 5 6; do
+              if dkp-pacman -Syu --noconfirm switch-dev; then ok=1; break; fi
+              echo "Intento $i fallido, reintentando en 30s..."
+              sleep 30
+            done
+            [ "$ok" = 1 ] || { echo "No se pudo instalar switch-dev (pkg.devkitpro.org no responde)"; exit 1; }
+          fi
           apt-get update
           apt-get install -y --no-install-recommends build-essential git curl ca-certificates python3
 
@@ -25,15 +35,21 @@ jobs:
           make -j"$(nproc)"
           install -m 755 hactool /usr/local/bin/hactool
 
-      - name: Añadir log.c / log.h si faltan en el repo
+      - name: Aplicar el soporte DDR200 completo de Lightos1 (reloj, reassert, log)
         run: |
-          BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2/source/utils
-          for f in log.c log.h; do
-            if [ ! -f "source/utils/$f" ]; then
-              curl -fsSL "$BASE/$f" -o "source/utils/$f"
-              echo "Descargado source/utils/$f"
-            fi
+          # El repo MiSi000/emuMMC_ddr200_test es una copia antigua: le falta la
+          # configuracion del reloj DDR200 (400 MHz, PLLC4_OUT0), por eso el driver
+          # cae a SDR104 sin avisar. Estos 5 archivos vienen del repo original.
+          BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2
+          for f in source/soc/clock.c source/soc/clock.h source/emuMMC/emummc.c source/utils/log.c source/utils/log.h; do
+            mkdir -p "$(dirname "$f")"
+            curl -fsSL "$BASE/$f" -o "$f"
+            echo "Aplicado $f"
           done
+          # Comprobaciones: si falta algo, parar aqui en vez de generar un .kipm inutil.
+          grep -q "case 400000:" source/soc/clock.c || { echo "ERROR: falta el reloj DDR200 en clock.c"; exit 1; }
+          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert en emummc.c"; exit 1; }
+          grep -q "EMUMMC_SDMMC_UHS_DDR200_SUPPORT" Makefile || { echo "ERROR: el Makefile no define EMUMMC_SDMMC_UHS_DDR200_SUPPORT"; exit 1; }
 
       - name: Compilar emummc.kip
         run: |
