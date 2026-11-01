@@ -1,4 +1,4 @@
-name: Build emuMMC DDR200 (.kip + .kipm)
+name: Build emuMMC DDR200 (variantes de prueba)
 
 on:
   workflow_dispatch:
@@ -35,40 +35,50 @@ jobs:
           make -j"$(nproc)"
           install -m 755 hactool /usr/local/bin/hactool
 
-      - name: Aplicar el soporte DDR200 completo de Lightos1 (reloj, reassert, log)
+      - name: Preparar funcion de compilacion
         run: |
-          # El repo MiSi000/emuMMC_ddr200_test es una copia antigua: le falta la
-          # configuracion del reloj DDR200 (400 MHz, PLLC4_OUT0), por eso el driver
-          # cae a SDR104 sin avisar. Estos 5 archivos vienen del repo original.
+          cat > /tmp/build_variant.sh <<'EOF'
+          #!/bin/bash
+          # Uso: build_variant.sh <nombre>
+          set -e
+          export DEVKITPRO=/opt/devkitpro
+          name="$1"
+          rm -f emummc.kip emummc_unpacked.kip emummc.caps emummc.data emummc.kipm
+          make clean || true
+          make -j"$(nproc)"
+          python3 tools/kip1converter.py emummc_unpacked.kip emummc.data
+          cat emummc.caps emummc.data > emummc.kipm
+          mkdir -p "out/$name"
+          cp emummc.kip emummc.kipm "out/$name/"
+          ls -l "out/$name"
+          EOF
+          chmod +x /tmp/build_variant.sh
+
+      - name: "Variante 1: solo reloj DDR200 (cambio minimo)"
+        run: |
+          # Del repo original solo el reloj de 400 MHz (clock.c/h) y el log.
+          # emummc.c se queda como en tu repo, sin el codigo de reasercion.
           BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2
-          for f in source/soc/clock.c source/soc/clock.h source/emuMMC/emummc.c source/utils/log.c source/utils/log.h; do
+          for f in source/soc/clock.c source/soc/clock.h source/utils/log.c source/utils/log.h; do
             mkdir -p "$(dirname "$f")"
             curl -fsSL "$BASE/$f" -o "$f"
             echo "Aplicado $f"
           done
-          # Comprobaciones: si falta algo, parar aqui en vez de generar un .kipm inutil.
           grep -q "case 400000:" source/soc/clock.c || { echo "ERROR: falta el reloj DDR200 en clock.c"; exit 1; }
-          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert en emummc.c"; exit 1; }
           grep -q "EMUMMC_SDMMC_UHS_DDR200_SUPPORT" Makefile || { echo "ERROR: el Makefile no define EMUMMC_SDMMC_UHS_DDR200_SUPPORT"; exit 1; }
+          /tmp/build_variant.sh 1-solo-reloj
 
-      - name: Compilar emummc.kip
+      - name: "Variante 2: completa (reloj + reasercion + registro)"
         run: |
-          export DEVKITPRO=/opt/devkitpro
-          make clean || true
-          make -j"$(nproc)"
-          ls -l emummc.kip emummc_unpacked.kip
-
-      - name: Generar emummc.kipm (para hekate)
-        run: |
-          python3 tools/kip1converter.py emummc_unpacked.kip emummc.data
-          cat emummc.caps emummc.data > emummc.kipm
-          ls -l emummc.caps emummc.data emummc.kipm
+          # Igual que la 1, mas el emummc.c del repo original.
+          BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2
+          curl -fsSL "$BASE/source/emuMMC/emummc.c" -o source/emuMMC/emummc.c
+          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert en emummc.c"; exit 1; }
+          /tmp/build_variant.sh 2-completa
 
       - name: Subir resultados
         uses: actions/upload-artifact@v4
         with:
           name: emummc-ddr200
-          path: |
-            emummc.kip
-            emummc.kipm
+          path: out
           if-no-files-found: error
