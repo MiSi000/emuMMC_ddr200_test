@@ -15,7 +15,7 @@ jobs:
         run: |
           dkp-pacman -Syu --noconfirm switch-dev
           apt-get update
-          apt-get install -y --no-install-recommends build-essential git ca-certificates python3
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates python3
 
       - name: Compilar hactool (lo necesita el Makefile)
         run: |
@@ -24,6 +24,16 @@ jobs:
           cp config.mk.template config.mk
           make -j"$(nproc)"
           install -m 755 hactool /usr/local/bin/hactool
+
+      - name: Añadir log.c / log.h si faltan en el repo
+        run: |
+          BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2/source/utils
+          for f in log.c log.h; do
+            if [ ! -f "source/utils/$f" ]; then
+              curl -fsSL "$BASE/$f" -o "source/utils/$f"
+              echo "Descargado source/utils/$f"
+            fi
+          done
 
       - name: Compilar emummc.kip
         run: |
