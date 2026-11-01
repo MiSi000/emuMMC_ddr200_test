@@ -196,6 +196,15 @@
 #define SDHCI_TIMING_UHS_SDR82  12 // SDR104 with a 163.2MHz -> 81.6MHz clock.
 #define SDHCI_TIMING_UHS_DDR50  13
 #define SDHCI_TIMING_MMC_HS102  14
+#define SDHCI_TIMING_UHS_DDR200 15
+
+#ifndef EMUMMC_DDR200_SRC_KHZ
+#define EMUMMC_DDR200_SRC_KHZ 400000
+#endif
+
+#define SDMMC_HW_TAP_TUNING       0x100
+#define SDMMC_INVALID_TAP         0x100
+#define SDMMC_SAMPLE_WIN_SIZE_MIN 8
 
 #define SDHCI_CAN_64BIT 0x10000000
 
@@ -224,6 +233,8 @@ typedef struct _sdmmc_t
 	u32 rsp[4];
 	u32 rsp3;
 	int t210b01;
+	u32 autocal_sts;
+	int autocal_fallback;
 } sdmmc_t;
 
 /*! SDMMC command. */
@@ -262,5 +273,8 @@ void sdmmc_end(sdmmc_t *sdmmc);
 void sdmmc_init_cmd(sdmmc_cmd_t *cmdbuf, u16 cmd, u32 arg, u32 rsp_type, u32 check_busy);
 int  sdmmc_execute_cmd(sdmmc_t *sdmmc, sdmmc_cmd_t *cmd, sdmmc_req_t *req, u32 *blkcnt_out);
 int  sdmmc_enable_low_voltage(sdmmc_t *sdmmc);
+#ifdef EMUMMC_SDMMC_UHS_DDR200_SUPPORT
+void sdmmc_ddr200_restore_host_cfg(sdmmc_t *sdmmc);
+#endif
 
 #endif
