@@ -68,13 +68,39 @@ jobs:
           grep -q "EMUMMC_SDMMC_UHS_DDR200_SUPPORT" Makefile || { echo "ERROR: el Makefile no define EMUMMC_SDMMC_UHS_DDR200_SUPPORT"; exit 1; }
           /tmp/build_variant.sh 1-solo-reloj
 
-      - name: "Variante 2: completa (reloj + reasercion + registro)"
+      - name: "Variante 3: reloj + no cambiar al driver de FS (un solo cambio)"
         run: |
-          # Igual que la 1, mas el emummc.c del repo original.
+          # Igual que la 1, mas UN cambio en emummc.c: en emuMMC raw, no pasar al
+          # driver de Nintendo tras la primera lectura de la SD si DDR200 esta activo.
+          python3 - <<'PY'
+          p = "source/emuMMC/emummc.c"
+          s = open(p).read()
+          old = "                first_sd_read = false;\n                if (emuMMC_ctx.EMMC_Type == emuMMC_SD_Raw)\n"
+          new = "                first_sd_read = false;\n                if (emuMMC_ctx.EMMC_Type == emuMMC_SD_Raw && !nx_sd_is_ddr200())\n"
+          assert s.count(old) == 1, "no se encontro el punto a modificar en emummc.c"
+          open(p, "w").write(s.replace(old, new))
+          PY
+          grep -n "nx_sd_is_ddr200" source/emuMMC/emummc.c
+          /tmp/build_variant.sh 3-sin-cambio-a-driver-FS
+
+      - name: "Variante 4: completa pero SIN la lectura del boton Volumen+"
+        run: |
+          # emummc.c del repo original (reasercion de DDR200), quitando el bloque que
+          # lee el GPIO de Volumen+ sin configurarlo y que reinicia a la pantalla de error.
           BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2
           curl -fsSL "$BASE/source/emuMMC/emummc.c" -o source/emuMMC/emummc.c
-          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert en emummc.c"; exit 1; }
-          /tmp/build_variant.sh 2-completa
+          python3 - <<'PY'
+          import re
+          p = "source/emuMMC/emummc.c"
+          s = open(p).read()
+          pat = re.compile(r"[ \t]*bool dump_requested = !gpio_read\(GPIO_PORT_X, GPIO_PIN_6\);\n\s*\n[ \t]*if \(dump_requested\) \{\n(?:[^\n]*\n)*?[ \t]*ViewLog\(\);\n[ \t]*\}\n\s*\n")
+          s2, n = pat.subn("", s)
+          assert n == 1, "no se encontro el bloque del boton"
+          assert "ViewLog" not in s2 and "dump_requested" not in s2
+          open(p, "w").write(s2)
+          PY
+          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert"; exit 1; }
+          /tmp/build_variant.sh 4-completa-sin-boton
 
       - name: Subir resultados
         uses: actions/upload-artifact@v4
