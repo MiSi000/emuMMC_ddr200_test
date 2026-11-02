@@ -83,24 +83,40 @@ jobs:
           grep -n "nx_sd_is_ddr200" source/emuMMC/emummc.c
           /tmp/build_variant.sh 3-sin-cambio-a-driver-FS
 
-      - name: "Variante 4: completa pero SIN la lectura del boton Volumen+"
+      - name: "Variante 5: DIAGNOSTICO (muestra el modo SD negociado y reinicia a RCM)"
         run: |
-          # emummc.c del repo original (reasercion de DDR200), quitando el bloque que
-          # lee el GPIO de Volumen+ sin configurarlo y que reinicia a la pantalla de error.
-          BASE=https://raw.githubusercontent.com/Lightos1/emuMMC_ddr200/108f16329adf2a19dcb6d3904807880b1228ffd2
-          curl -fsSL "$BASE/source/emuMMC/emummc.c" -o source/emuMMC/emummc.c
+          # Parte de la variante 3 (emummc.c ya modificado) y anade una parada
+          # intencionada en la primera lectura de NAND que muestra el modo SD.
           python3 - <<'PY'
-          import re
           p = "source/emuMMC/emummc.c"
           s = open(p).read()
-          pat = re.compile(r"[ \t]*bool dump_requested = !gpio_read\(GPIO_PORT_X, GPIO_PIN_6\);\n\s*\n[ \t]*if \(dump_requested\) \{\n(?:[^\n]*\n)*?[ \t]*ViewLog\(\);\n[ \t]*\}\n\s*\n")
-          s2, n = pat.subn("", s)
-          assert n == 1, "no se encontro el bloque del boton"
-          assert "ViewLog" not in s2 and "dump_requested" not in s2
-          open(p, "w").write(s2)
+          anchor = "static void _sdmmc_ensure_device_attached(void)\n"
+          assert s.count(anchor) == 1, "no se encontro el ancla 1"
+          helper = (
+              "// DIAGNOSTICO: reinicia a RCM mostrando en el codigo de error el modo SD negociado.\n"
+              "// Codigo mostrado 2001-NNNN, NNNN = modo * 256 + velocidad (MHz).\n"
+              "static void __attribute__((noreturn)) diag_abort(u32 info)\n"
+              "{\n"
+              "    atmosphere_fatal_error_ctx ctx;\n"
+              "    memset(&ctx, 0, sizeof(ctx));\n"
+              "    ctx.magic = ATMOSPHERE_REBOOT_TO_FATAL_MAGIC;\n"
+              "    ctx.title_id = 0x0100000000000000;\n"
+              "    ctx.error_desc = (info << 9) | 1;\n"
+              "    smcCopyToIram(ATMOSPHERE_FATAL_ERROR_ADDR, &ctx, sizeof(ctx));\n"
+              "    smcRebootToRcm();\n"
+              "    while (true)\n"
+              "        ;\n"
+              "}\n\n"
+          )
+          s = s.replace(anchor, helper + anchor)
+          old = "            // Call hekates driver.\n            if (emummc_read_write_inner(buf, sector, num_sectors, false))"
+          assert s.count(old) == 1, "no se encontro el ancla 2"
+          new = "            diag_abort(((nx_sd_mode_get() & 0xF) << 8) | (sd_storage.csd.busspeed & 0xFF));\n" + old
+          s = s.replace(old, new)
+          open(p, "w").write(s)
           PY
-          grep -q "_ddr200_reassert" source/emuMMC/emummc.c || { echo "ERROR: falta _ddr200_reassert"; exit 1; }
-          /tmp/build_variant.sh 4-completa-sin-boton
+          grep -n "diag_abort" source/emuMMC/emummc.c
+          /tmp/build_variant.sh 5-diagnostico
 
       - name: Subir resultados
         uses: actions/upload-artifact@v4
